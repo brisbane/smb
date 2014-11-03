@@ -1,0 +1,102 @@
+#!/bin/bash 
+# WARNING: THIS FILE IS MAINTAINED BY PUPPET!! DO NOT EDIT BY HAND
+# CONTACT itsupport@physics.ox.ac.uk IF YOU WOULD LIKE THIS CHANGED
+#===============================================================================
+#
+#          FILE:  auto.home
+# 
+#         USAGE:  See usage_and_exit() below 
+# 
+#   DESCRIPTION:  
+#                   Creates an automount entry for users AD home directories 
+#                   at /home/username
+#                   is created by cfengine. You may use other usernames or directories
+#                   by specifying flags (see usage_and_exit() below)
+# 
+#        AUTHOR:   Sean Brisbane <s.brisbane@physics.ox.ac.uk> 
+#===============================================================================
+VERBOSE=''
+
+#-------------------------------------------------------------------------------
+#   Define constants
+#-------------------------------------------------------------------------------
+
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+PROGRAM_NAME=$(basename $0)
+#now use dns
+#DC=dc3.physics.ox.ac.uk
+
+#-------------------------------------------------------------------------------
+#   Variables determined at runtime
+#-------------------------------------------------------------------------------
+
+# Nothing to see here at the moment
+
+#-------------------------------------------------------------------------------
+#   Function definitions
+#-------------------------------------------------------------------------------
+
+error_echo(){
+    if [[ $LOGFILE ]]; then
+        echo $* | tee ${LOGFILE}_err 
+        echo $* >&2 
+    else
+        echo $* >&2 
+    fi
+}
+
+debug(){
+    # Debug info is written to a logfile if specified, else stderr if verbose specified.
+    if [[ $LOGFILE ]]
+    then
+        echo $* >>$LOGFILE
+    fi
+    if [[ $VERBOSE ]]
+    then
+        error_echo $* >&2
+    fi
+}
+#hacky
+unixcapable() {
+   echo "$1" | grep plx >/dev/null 2>&1 && return 0
+   return 1
+}
+
+#Thank you cvmfs
+# Sanitize input, anything that's not a user name is rejected
+if echo "$1" | grep -q '[^a-zA-Z0-9_-]'; then
+  exit 1
+fi
+if [ $(echo "x$1" | wc -l | awk '{print $1}') -gt 1 ]; then
+  exit 1
+fi
+if [ $(echo "x$1" | head -c2) = "x-" ]; then
+  exit 1
+fi
+
+
+if ! [[ $1 ]]; then
+   exit 1
+fi
+SMB_USERNAME="$1"
+USERID=`id -u "$SMB_USERNAME"`
+GRPID=`id -g "$SMB_USERNAME"`
+if ! [[ $USERID ]] || ! [[ $GRPID ]];then
+   exit 1
+fi
+extraopts=''
+
+REMOTE_SERVER_SHARE=$(ldapsearch -b dc=physics,dc=ox,dc=ac,dc=uk -x -D adreader@physics.ox.ac.uk -w aDR501147 -H ldap:///dc%3Dphysics%2Cdc%3Dox%2Cdc%3Dac%2Cdc%3Duk "(&(objectClass=User)(sAMAccountName=$SMB_USERNAME))" homeDirectory 2>/dev/null | grep ^homeDirectory | awk -F: '{print $2}' | sed 's%\\%/%g' | sed 's% %%g')
+if ! [[ $REMOTE_SERVER_SHARE ]]; then
+  exit 1
+fi
+if ! unixcapable $REMOTE_SERVER_SHARE ; then
+    extraopts=",file_mode=0600,dir_mode=0700" 
+else
+    extraopts=",nobrl"
+fi
+if  ! [[ $USERID ]] || ! [[ $GRPID ]] ; then
+  exit 1
+fi
+echo  -fstype=cifs,hard,intr,sec=krb5,uid=$USERID,cruid=$USERID,gid=$GRPID$extraopts    \":$REMOTE_SERVER_SHARE\"
+exit 0

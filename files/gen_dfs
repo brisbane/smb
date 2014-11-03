@@ -1,0 +1,77 @@
+#!/bin/env python
+import os
+localdfsroot='/physics'
+fname="/etc/auto.dfs"
+
+import sys
+from socket import gethostname
+
+if len(sys.argv) > 1:
+  fname = sys.argv[1]
+def homeold(out):
+  of=open(out,"w")
+  for u in users:
+     user=u.strip()
+  
+     if user in mdict.keys():
+       #print user, 'goes to ', mdict[user]
+       user=mdict[user]
+     cmd = "ldapsearch -w aDR501147  -b dc=physics,dc=ox,dc=ac,dc=uk  -D adreader@physics.ox.ac.uk -h lennon.physics.ox.ac.uk \"(&(objectClass=User)(samaccountname="+user+"))\" homeDirectory | grep -i ^homeDirectory | awk -F: '{print $2}' | awk '{print $NF}' |sed 's/ //'"
+     ls=os.popen(cmd).readlines()
+     if len (ls) > 0 :
+        of.write( str("\\\n/"+user.lower()+'\t":'+  ls[0].strip().replace('\\','/')+'"') )
+
+def home(out):
+  of=open(out,"w")
+  for u in users:
+     user=u.strip()
+     if user in mdict.keys():
+       #print user, 'goes to ', mdict[user]
+       user=mdict[user]
+     cmd = "ldapsearch -w aDR501147  -b dc=physics,dc=ox,dc=ac,dc=uk  -D adreader@physics.ox.ac.uk -h lennon.physics.ox.ac.uk \"(&(objectClass=User)(samaccountname="+user+"))\" homeDirectory | grep -i ^homeDirectory | awk -F: '{print $2}' | awk '{print $NF}' |sed 's/ //'"
+     ls=os.popen(cmd).readlines()
+     if len (ls) > 0 :
+        of.write( localdfsroot + "/home/"+user+'\t-fstype=cifs,multiuser,sec=krb5\t":'+  ls[0].strip().replace('\\','/')+'"\n')
+
+  
+  
+try:
+    import xml.etree.cElementTree as ET
+except ImportError:
+    import xml.etree.ElementTree as ET
+
+tree =  ET.ElementTree(file=str(fname)+'.xml')
+root = tree.getroot()
+ofile=open(fname,'w')
+keys={}
+host= gethostname().upper()
+host=host[0:host.find('.')]
+ofile.write('/physics/home  -fstype=autofs program:/etc/automount/auto.home.samba\n')
+for child_of_root in root:
+    #print child_of_root.tag, child_of_root.attrib
+    #print child_of_root.attrib.keys()
+    if child_of_root.attrib.has_key('Name'):
+        key = child_of_root.attrib['Name']
+        for i in child_of_root:
+          #Broken servers, such as ppfs4, still in dfs
+          if i.attrib['State'] == '1' : continue
+
+          dir=i.attrib['Folder']
+          serv=i.attrib['Server']
+          rk=key.replace('\\','/')
+       #   print rk
+          if not keys.has_key(rk):
+             keys[rk] = []
+#klist -kt | grep -i "$(hostname -s)\\$"
+
+#          print localdfsroot+'/'+str(rk.encode('utf-8')).strip()+'\t-fstype=cifs,multiuser,sec=krb5,nobrl,username='+user + '$\t"://'+serv+'/'+ str(dir.replace('\\','/').encode('utf-8'))+'"'
+          #position 0 is /home, then continue
+          if str(rk.encode('utf-8')).strip().find('home')==0: continue
+          ofile.write(localdfsroot+'/'+str(rk.encode('utf-8')).strip().lower()+'\t-fstype=cifs,multiuser,sec=krb5,nobrl\t"://'+serv+'/'+ str(dir.replace('\\','/').encode('utf-8'))+'"\n' )
+          #legacy support
+          if  str(rk.encode('utf-8')).strip().lower().find('users/particle') != -1:
+              ofile.write(localdfsroot+'/'+str(rk.encode('utf-8')).strip()+'\t-fstype=cifs,multiuser,sec=krb5,nobrl\t"://'+serv+'/'+ str(dir.replace('\\','/').encode('utf-8'))+'"\n' )
+
+          #stop at first woring server (autofs failover seems not to work)
+          break
+ofile.close()
