@@ -1,11 +1,9 @@
 class smb (  )
 inherits smb::params 
 {
-   notify { "This class requires a manual keytab to be created with {host,nfs,[cifs]}/$(hostname).physics.ox.ac.uk@PHYSICS.OX.AC.UK, " : }
-   notify { "To do this: create a user in the Users part of the AD, name should be [svcname][hsotname] eg nfsCplxfs3.  Next log on to DC3, open an administrator command prompt, and run ktpass -princ [svc]/fqdn@PHYSICS.OX.AC.UK -mapuser {svcname}{hostname}@PHYSICS.OX.AC.UK -mapop add -out new.keytab.  Secure copy this from DC3 to /etc/krb5.keytab on the new file server" : }
-#   class { "oxford_nfs_server::generic" : }
-#   class { "oxford_nfs_server::nfs" : }
+   
     class { "smb::generic" : }
+#Dont want this by default I dont think
 #   class { "smb::server" : }
     class { "smb::client" : }
 }
@@ -26,9 +24,11 @@ class smb::generic   (
          mode    => '0444',
          notify =>  [Service['smb']],
   }
- 
+
+   
    $central_samba_packagelist = ['samba', 'openldap-clients']
-   service{  ['nmb','smb'] :
+   $services=['smb'] # nmb
+   service{  $services :
                    ensure => $smbserviceensure,
                    hasstatus => true,
                    hasrestart => true,
@@ -45,7 +45,7 @@ class smb::generic   (
            owner => 'root',
            group => 'root',
            mode => 0444,
-           notify => Service['nmb','smb']
+           notify => Service[$services]
       }
 
 }
@@ -76,7 +76,9 @@ class smb::client (
   $configfilepath = $smb::params::configfilepath
 ) inherits smb::params
 {
-   class { smb::generic : 
+  ensure_packages ( ["samba-client"] )
+
+  class { smb::generic : 
        smbserviceensure => "stopped",
        smbserviceenable => "false"
    }
@@ -121,6 +123,16 @@ class smb::client (
           ensure =>directory,
           notify => Service["autofs"],
   }
+
+sysctl::conf { 
+  "vm.swappiness": value =>  60;
+  # increase max read/write buffer size that can be applied via setsockopt()
+  # "net.core.rmem_max": value =>  16777216;
+  # "net.core.wmem_max": value =>  16777216;
+  # Credential storage (smb/ nfs)
+  "kernel.keys.root_maxbytes": value => 50000;
+  "kernel.keys.root_maxkeys": value => 5000;
+ }
 ensure_resource ( 'file', "/etc/automount",
   {
           ensure  => 'directory',
